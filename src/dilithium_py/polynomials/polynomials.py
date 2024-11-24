@@ -78,6 +78,7 @@ class PolynomialRingDilithium(PolynomialRing):
 
     def rejection_sample_ntt_poly(self, rho, i, j):
         """
+        rejection sample ntt poly
         Samples an element in the NTT domain of R^q using rejection sampling
         """
 
