@@ -30,6 +30,9 @@ except ImportError:
 
 class ML_DSA:
     def __init__(self, parameter_set):
+        """
+        https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf#page=25
+        """
         self.d = parameter_set["d"]
         self.k = parameter_set["k"]
         self.l = parameter_set["l"]
@@ -78,24 +81,39 @@ class ML_DSA:
     """
 
     @staticmethod
-    def _h(input_bytes, length):
+    def H(input_bytes, length):
         """
+        FIPS 202
+        H(str, l) = SHAKE256(str, 8l)
         H: B^*  -> B^*
         """
         return shake256(input_bytes).read(length)
 
-    def _expand_matrix_from_seed(self, rho):
+    def ExpandA(self, rho):
         """
-        Helper function which generates a element of size
-        k x l from a seed `rho`.
-        """
-        A_data = [[0 for _ in range(self.l)] for _ in range(self.k)]
-        for i in range(self.k):
-            for j in range(self.l):
-                A_data[i][j] = self.R.rejection_sample_ntt_poly(rho, i, j) # type: ignore
-        return self.M(A_data)
+        FIPS 204
+        Samples a K * l matrix A-hat of elements of Tq
+        generates a element of size k x l from a seed `rho`
 
-    def _expand_vector_from_seed(self, rho_prime):
+        input: a seed `rho` of 32 bytes
+        output: Matrix A consisting of elements of Tq and size k x l
+        """
+        # declare the A matrix
+        A_hat = [[0 for s in range(self.l)] for r in range(self.k)]
+        for r in range(self.k):
+            for s in range(self.l):
+                A_hat[r][s] = self.R.rejection_sample_ntt_poly(rho, r, s)  # type: ignore
+        return self.M(A_hat)
+
+    def ExpandS(self, rho_prime):
+        """
+        FIPS 204
+        Samples a K * l matrix A-hat of elements of Tq
+        generates a element of size k x l from a seed `rho`
+
+        input: a seed `rho` of 32 bytes
+        output: Matrix A consisting of elements of Tq and size k x l
+        """
         s1_elements = [
             self.R.rejection_bounded_poly(rho_prime, i, self.eta) for i in range(self.l)
         ]
@@ -116,10 +134,16 @@ class ML_DSA:
         return self.M.vector(elements)
 
     @staticmethod
-    def _pack_pk(rho, t1):
+    def pkEncode(rho, t1):
+        """  
+        Algorithm 22
+        Encodes a public key for ML-DSA into a byte string
+
+        input: rho of 32 bytes, t1
+        """
         return rho + t1.bit_pack_t1()
 
-    def _pack_sk(self, rho, K, tr, s1, s2, t0):
+    def skEncode(self, rho, K, tr, s1, s2, t0):
         s1_bytes = s1.bit_pack_s(self.eta)
         s2_bytes = s2.bit_pack_s(self.eta)
         t0_bytes = t0.bit_pack_t0()
@@ -205,36 +229,41 @@ class ML_DSA:
         h = self._unpack_h(h_bytes)
         return c_tilde, z, h
 
-    def _keygen_internal(self, zeta):
+    def keygen_internal(self, zeta):
         """
-        Generates a public-private key pair from a seed following
-        Algorithm 6 (FIPS 204)
+        Algorithm 6 Generates a public-private key pair from a seed
+
+        input: seed zeta - random seed of 32 bytes
+        output: public key and private key
         """
         # Expand with an XOF (SHAKE256)
+        # concatenation of strings https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf#page=17
         seed_domain_sep = zeta + bytes([self.k]) + bytes([self.l])
-        seed_bytes = self._h(seed_domain_sep, 128)
+        seed_bytes = self.H(seed_domain_sep, 128)
 
-        # Split bytes into suitable chunks
+        # Split bytes into 32 sized chunks
         rho, rho_prime, K = seed_bytes[:32], seed_bytes[32:96], seed_bytes[96:]
 
         # Generate matrix A ∈ R^(kxl) in the NTT domain
-        A_hat = self._expand_matrix_from_seed(rho)
+        # A hat is generated and stored in NTT representation as A hat
+        A_hat = self.ExpandA(rho)
 
         # Generate the error vectors s1 ∈ R^l, s2 ∈ R^k
-        s1, s2 = self._expand_vector_from_seed(rho_prime)
+        (s1, s2) = self.ExpandS(rho_prime)
 
         # Matrix multiplication
-        s1_hat = s1.to_ntt() # type: ignore
-        t = (A_hat @ s1_hat).from_ntt() + s2
+        s1_hat = s1.to_ntt()  # type: ignore
+        t = (A_hat @ (s1_hat)).from_ntt() + s2
 
+        # compress T PowerTwoRound is applied componentwise
         t1, t0 = t.power_2_round(self.d)
 
         # Pack up the bytes
-        pk = self._pack_pk(rho, t1)
-        tr = self._h(pk, 64)
-        sk = self._pack_sk(rho, K, tr, s1, s2, t0)
+        pk = self.pkEncode(rho, t1)
+        tr = self.H(pk, 64)
+        sk = self.skEncode(rho, K, tr, s1, s2, t0)
 
-        return pk, sk
+        return (pk, sk)
 
     def _sign_internal(self, sk_bytes, m, rnd):
         """
@@ -245,22 +274,22 @@ class ML_DSA:
         rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
 
         # Precompute NTT representation
-        s1_hat = s1.to_ntt() # type: ignore
-        s2_hat = s2.to_ntt()# type: ignore
-        t0_hat = t0.to_ntt()# type: ignore
+        s1_hat = s1.to_ntt()  # type: ignore
+        s2_hat = s2.to_ntt()  # type: ignore
+        t0_hat = t0.to_ntt()  # type: ignore
 
         # Generate matrix A ∈ R^(kxl) in the NTT domain
-        A_hat = self._expand_matrix_from_seed(rho)
+        A_hat = self.ExpandA(rho)
 
         # Set seeds and nonce (kappa)
-        mu = self._h(tr + m, 64)
-        rho_prime = self._h(K + rnd + mu, 64)
+        mu = self.H(tr + m, 64)
+        rho_prime = self.H(K + rnd + mu, 64)
 
         kappa = 0
         alpha = self.gamma_2 << 1
         while True:
             y = self._expand_mask_vector(rho_prime, kappa)
-            y_hat = y.to_ntt()# type: ignore
+            y_hat = y.to_ntt()  # type: ignore
             w = (A_hat @ y_hat).from_ntt()
 
             # increment the nonce
@@ -277,7 +306,7 @@ class ML_DSA:
 
             # Create challenge polynomial
             w1_bytes = w1.bit_pack_w(self.gamma_2)
-            c_tilde = self._h(mu + w1_bytes, self.c_tilde_bytes)
+            c_tilde = self.H(mu + w1_bytes, self.c_tilde_bytes)
             c = self.R.sample_in_ball(c_tilde, self.tau)
             c_hat = c.to_ntt()
 
@@ -311,21 +340,21 @@ class ML_DSA:
         rho, t1 = self._unpack_pk(pk_bytes)
         c_tilde, z, h = self._unpack_sig(sig_bytes)
 
-        if h.sum_hint() > self.omega:# type: ignore
+        if h.sum_hint() > self.omega:  # type: ignore
             return False
 
-        if z.check_norm_bound(self.gamma_1 - self.beta):# type: ignore
+        if z.check_norm_bound(self.gamma_1 - self.beta):  # type: ignore
             return False
 
-        A_hat = self._expand_matrix_from_seed(rho)
+        A_hat = self.ExpandA(rho)
 
-        tr = self._h(pk_bytes, 64)
-        mu = self._h(tr + m, 64)
+        tr = self.H(pk_bytes, 64)
+        mu = self.H(tr + m, 64)
         c = self.R.sample_in_ball(c_tilde, self.tau)
 
         # Convert to NTT for computation
         c = c.to_ntt()
-        z = z.to_ntt()# type: ignore
+        z = z.to_ntt()  # type: ignore
 
         t1 = t1.scale(1 << self.d)
         t1 = t1.to_ntt()
@@ -333,19 +362,23 @@ class ML_DSA:
         Az_minus_ct1 = (A_hat @ z) - t1.scale(c)
         Az_minus_ct1 = Az_minus_ct1.from_ntt()
 
-        w_prime = h.use_hint(Az_minus_ct1, 2 * self.gamma_2)# type: ignore
+        w_prime = h.use_hint(Az_minus_ct1, 2 * self.gamma_2)  # type: ignore
         w_prime_bytes = w_prime.bit_pack_w(self.gamma_2)
 
-        return c_tilde == self._h(mu + w_prime_bytes, self.c_tilde_bytes)
+        return c_tilde == self.H(mu + w_prime_bytes, self.c_tilde_bytes)
 
     def keygen(self):
         """
+        Algorithm 1 ML-DSA.KeyGen()
         Generates a public-private key pair following
-        Algorithm 1 (FIPS 204)
+
+        output: public key and private key
         """
-        zeta = self.random_bytes(32)
-        pk, sk = self._keygen_internal(zeta)
-        return pk, sk
+        zeta = self.random_bytes(32)  # choose random seed
+        if not zeta:
+            raise ValueError("Random bit generation failed")
+        # pk, sk
+        return self.keygen_internal(zeta)
 
     def sign(self, sk_bytes, m, ctx=b"", deterministic=False):
         """
