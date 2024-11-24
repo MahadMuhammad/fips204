@@ -1,3 +1,24 @@
+"""
+This module is designed according to the specifications provided in
+the NIST FIPS-204 document. You can see more about it here:
+https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf#page=27
+
+
+The first eight functions are the core functions that are used to implement
+
+Algorithm 1 ML-DSA.KeyGen()
+Algorithm 2 ML-DSA.Sign(private key, message, context string)
+Algorithm 3 ML-DSA.Verify(public key, message, signature, context string)
+Algorithm 4 HashML-DSA.Sign(private key, message {0,1} Kleene-star, context string, pre-hash function)
+    - In this algorithm, by default the context string is set to an empty string, though applications may specify the use
+    of a non-empty context string.
+Algorithm 5 HashML-DSA.Verify(public key, message {0,1} Kleene Star, signature, context string (a byte string of 255 or fewer bytes), pre-hash function)
+Algorithm 6 ML-DSA.KeyGen_internal(seed {0,1,..,255}^(32+32k(bitlen(q-1)-d)))
+Algorithm 7 ML-DSA.Sign_internal(private key, formatted message
+, pre-message randomness or dummy variable)
+Algorithm 8 ML-DSA.Verify_internal(public key, message, signature)
+"""
+
 import os
 from ..modules.modules import ModuleDilithium
 
@@ -71,7 +92,7 @@ class ML_DSA:
         A_data = [[0 for _ in range(self.l)] for _ in range(self.k)]
         for i in range(self.k):
             for j in range(self.l):
-                A_data[i][j] = self.R.rejection_sample_ntt_poly(rho, i, j)
+                A_data[i][j] = self.R.rejection_sample_ntt_poly(rho, i, j) # type: ignore
         return self.M(A_data)
 
     def _expand_vector_from_seed(self, rho_prime):
@@ -203,7 +224,7 @@ class ML_DSA:
         s1, s2 = self._expand_vector_from_seed(rho_prime)
 
         # Matrix multiplication
-        s1_hat = s1.to_ntt()
+        s1_hat = s1.to_ntt() # type: ignore
         t = (A_hat @ s1_hat).from_ntt() + s2
 
         t1, t0 = t.power_2_round(self.d)
@@ -224,9 +245,9 @@ class ML_DSA:
         rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
 
         # Precompute NTT representation
-        s1_hat = s1.to_ntt()
-        s2_hat = s2.to_ntt()
-        t0_hat = t0.to_ntt()
+        s1_hat = s1.to_ntt() # type: ignore
+        s2_hat = s2.to_ntt()# type: ignore
+        t0_hat = t0.to_ntt()# type: ignore
 
         # Generate matrix A ∈ R^(kxl) in the NTT domain
         A_hat = self._expand_matrix_from_seed(rho)
@@ -239,7 +260,7 @@ class ML_DSA:
         alpha = self.gamma_2 << 1
         while True:
             y = self._expand_mask_vector(rho_prime, kappa)
-            y_hat = y.to_ntt()
+            y_hat = y.to_ntt()# type: ignore
             w = (A_hat @ y_hat).from_ntt()
 
             # increment the nonce
@@ -290,10 +311,10 @@ class ML_DSA:
         rho, t1 = self._unpack_pk(pk_bytes)
         c_tilde, z, h = self._unpack_sig(sig_bytes)
 
-        if h.sum_hint() > self.omega:
+        if h.sum_hint() > self.omega:# type: ignore
             return False
 
-        if z.check_norm_bound(self.gamma_1 - self.beta):
+        if z.check_norm_bound(self.gamma_1 - self.beta):# type: ignore
             return False
 
         A_hat = self._expand_matrix_from_seed(rho)
@@ -304,7 +325,7 @@ class ML_DSA:
 
         # Convert to NTT for computation
         c = c.to_ntt()
-        z = z.to_ntt()
+        z = z.to_ntt()# type: ignore
 
         t1 = t1.scale(1 << self.d)
         t1 = t1.to_ntt()
@@ -312,7 +333,7 @@ class ML_DSA:
         Az_minus_ct1 = (A_hat @ z) - t1.scale(c)
         Az_minus_ct1 = Az_minus_ct1.from_ntt()
 
-        w_prime = h.use_hint(Az_minus_ct1, 2 * self.gamma_2)
+        w_prime = h.use_hint(Az_minus_ct1, 2 * self.gamma_2)# type: ignore
         w_prime_bytes = w_prime.bit_pack_w(self.gamma_2)
 
         return c_tilde == self._h(mu + w_prime_bytes, self.c_tilde_bytes)
