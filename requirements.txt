@@ -1,0 +1,2 @@
+pycryptodome==3.21.0
+xoflib==0.3.1
