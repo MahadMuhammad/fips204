@@ -48,32 +48,8 @@ class ML_DSA:
         self.R = self.M.ring
 
         # Use system randomness by default, for deterministic randomness
-        # use the method `set_drbg_seed()`
+        # use the method NIST SP 800-90A
         self.random_bytes = os.urandom
-
-    def set_drbg_seed(self, seed):
-        """
-        Change entropy source to a DRBG and seed it with provided value.
-
-        Setting the seed switches the entropy source from :func:`os.urandom()`
-        to an AES256 CTR DRBG.
-
-        Used for both deterministic versions of Kyber as well as testing
-        alignment with the KAT vectors
-
-        Note:
-          currently requires pycryptodome for AES impl.
-        """
-        try:
-            from ..drbg.aes256_ctr_drbg import AES256_CTR_DRBG
-
-            self._drbg = AES256_CTR_DRBG(seed)
-            self.random_bytes = self._drbg.random_bytes
-        except ImportError as e:  # pragma: no cover
-            print(f"Error importing AES from pycryptodome: {e = }")
-            raise Warning(
-                "Cannot set DRBG seed due to missing dependencies, try installing requirements: pip -r install requirements"
-            )
 
     """
     H() uses Shake256 to hash data to 32 and 64 bytes in a
